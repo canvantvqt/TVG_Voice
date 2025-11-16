@@ -1,22 +1,24 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 import speech_recognition as sr
-from io import BytesIO
-from pydub import AudioSegment
 import json
 import base64
+from io import BytesIO
+from pydub import AudioSegment
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
 
 st.set_page_config(page_title="Trưng Vương Garden - Voice Assistant", layout="centered")
 
+# ---- Tiêu đề ----
 st.markdown("<h2 style='text-align:center;'>CHÀO MỪNG BẠN ĐẾN TRƯNG VƯƠNG GARDEN</h2>", unsafe_allow_html=True)
 st.markdown("<h4 style='text-align:center;'>TRỢ LÝ A.I BẰNG GIỌNG NÓI TVG</h4>", unsafe_allow_html=True)
 
 st.markdown("""
 **Hướng dẫn ngắn:**
 1) Nhấn **Phát lời chào** để nghe giới thiệu.
-2) Nhấn **Bấm để hỏi**, ghi âm câu hỏi (upload file audio).
+2) Nhấn **🎤 Bấm để hỏi**, nói câu hỏi trực tiếp bằng micro.
 3) Trợ lý trả lời bằng âm thanh.
-4) Nhấn **Kết thúc** để chào tạm biệt.
+4) Nhấn **⏹ Kết thúc** để chào tạm biệt.
 """)
 
 # ---- Load FAQ JSON ----
@@ -34,7 +36,7 @@ def find_answer(user_text):
     return ("Xin lỗi, tôi chưa hiểu câu hỏi của bạn. "
             "Bạn có thể hỏi về giờ mở cửa, giá vé, trải nghiệm, ẩm thực, khuyến mãi hoặc liên hệ.")
 
-# ---- Phát lời chào bằng HTML5 audio (miễn phí, trình duyệt) ----
+# ---- Phát audio bằng HTML5 (miễn phí) ----
 def play_audio_file(file_path):
     audio_file = open(file_path, "rb").read()
     b64_audio = base64.b64encode(audio_file).decode()
@@ -50,13 +52,12 @@ def play_audio_file(file_path):
 def transcribe_audio(uploaded_file):
     if uploaded_file is None:
         return None
-    # Chuyển audio về WAV nếu cần
     file_bytes = uploaded_file.read()
     audio = AudioSegment.from_file(BytesIO(file_bytes))
     wav_io = BytesIO()
     audio.export(wav_io, format="wav")
     wav_io.seek(0)
-    
+
     recognizer = sr.Recognizer()
     with sr.AudioFile(wav_io) as source:
         audio_data = recognizer.record(source)
@@ -68,39 +69,44 @@ def transcribe_audio(uploaded_file):
         except sr.RequestError:
             return "Hiện tại không thể kết nối dịch vụ STT."
 
-# ---- MAIN UI ----
-# ---- MAIN UI ----
-col1, col2, col3 = st.columns([1,2,1])  # col2 rộng hơn
+# ---- Main UI ----
+col1, col2, col3 = st.columns([1,2,1])
 
 # State
 if 'stop' not in st.session_state:
     st.session_state.stop = False
 
+# Nút phát lời chào
 with col1:
     if st.button("▶️ Phát lời chào"):
-        play_audio_file("intro.mp3")
+        play_audio_file("intro.mp3")  # intro.mp3 phải có trong repo
 
-# Đặt file uploader ngoài col2 để rộng toàn màn hình cột giữa
-st.markdown("### 🎤 Bấm để hỏi (upload file audio)")
-uploaded_audio = st.file_uploader("", type=["wav", "mp3", "m4a", "webm"])
-if uploaded_audio is not None:
-    user_text = transcribe_audio(uploaded_audio)
-    st.info(f"Bạn nói: {user_text}")
-    answer_text = find_answer(user_text)
-    st.success(f"Trợ lý trả lời: {answer_text}")
-    # Phát bằng TTS trình duyệt
-    tts_file = "temp_answer.mp3"
-    from gtts import gTTS
-    tts = gTTS(text=answer_text, lang="vi")
-    tts.save(tts_file)
-    play_audio_file(tts_file)
+# Nút bấm để hỏi (ghi âm trực tiếp)
+with col2:
+    st.markdown("### 🎤 Bấm để hỏi")
+    uploaded_audio = st.file_uploader("Hoặc upload file audio nếu không muốn ghi trực tiếp", type=["wav","mp3","m4a","webm"])
+    
+    if uploaded_audio is not None:
+        user_text = transcribe_audio(uploaded_audio)
+        st.info(f"Bạn nói: {user_text}")
+        answer_text = find_answer(user_text)
+        st.success(f"Trợ lý trả lời: {answer_text}")
+        # Phát bằng trình duyệt
+        from gtts import gTTS
+        tts_file = "temp_answer.mp3"
+        tts = gTTS(text=answer_text, lang="vi")
+        tts.save(tts_file)
+        play_audio_file(tts_file)
 
+# Nút kết thúc
 with col3:
     if st.button("⏹ Kết thúc"):
         farewell_text = "Cảm ơn bạn đã sử dụng Trợ lý Trưng Vương Garden. Chào tạm biệt!"
         st.success(farewell_text)
+        from gtts import gTTS
         tts = gTTS(text=farewell_text, lang="vi")
         tts.save("farewell.mp3")
         play_audio_file("farewell.mp3")
         st.session_state.stop = True
+
 st.markdown("<p style='text-align:center; color: gray;'>Sản phẩm do nhóm học sinh CLB Lập trình lớp 7C</p>", unsafe_allow_html=True)
