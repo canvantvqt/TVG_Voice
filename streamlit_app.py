@@ -1,109 +1,97 @@
-# streamlit_app.py
-# -*- coding: utf-8 -*-
 import streamlit as st
 import json
 import tempfile
-from pathlib import Path
-from io import BytesIO
-from gtts import gTTS
-from pydub import AudioSegment
-import os
 import speech_recognition as sr
 
-# ---------- Config ----------
-st.set_page_config(page_title="Trưng Vương Garden - Voice Assistant", layout="centered")
-
-# ---------- Load FAQ ----------
-FAQ_PATH = Path("faq_garden.json")
-if not FAQ_PATH.exists():
-    st.error("Không tìm thấy file faq_garden.json. Vui lòng đặt file JSON vào cùng thư mục.")
-    st.stop()
-
-with open(FAQ_PATH, encoding="utf-8") as f:
-    faq_data = json.load(f)
-
-def find_answer(user_text: str) -> str:
-    for item in faq_data.get("faq", []):
-        for kw in item.get("question", []):
-            if kw.lower() in user_text.lower():
-                return item.get("answer", "")
-    return ("Xin lỗi, tôi chưa hiểu câu hỏi của bạn. "
-            "Bạn có thể hỏi về giờ mở cửa, giá vé, trải nghiệm, ẩm thực, khuyến mãi hoặc liên hệ.")
-
-# ---------- Helpers ----------
-def save_audio_bytes_to_wav(audio_bytes: bytes) -> str:
-    """Convert audio bytes to wav file."""
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        tmp_path = f.name
-    audio = AudioSegment.from_file(BytesIO(audio_bytes))
-    audio.export(tmp_path, format="wav")
-    return tmp_path
-
-def transcribe_audio(wav_path: str) -> str:
-    r = sr.Recognizer()
-    with sr.AudioFile(wav_path) as source:
-        audio = r.record(source)
+# =========================
+# 1. LOAD DATA JSON
+# =========================
+def load_faq():
     try:
-        return r.recognize_google(audio, language="vi-VN")
+        with open("faq_garden.json", "r", encoding="utf-8") as f:
+            return json.load(f)
     except:
-        return ""
+        return {"faq": []}
 
-def tts_bytes(text: str) -> bytes:
-    """Tạo mp3 bytes từ văn bản bằng gTTS."""
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-        tmp_mp3 = f.name
-    tts = gTTS(text=text, lang="vi")
-    tts.save(tmp_mp3)
-    data = Path(tmp_mp3).read_bytes()
-    os.remove(tmp_mp3)
-    return data
+faq_data = load_faq()
 
-# ---------- UI ----------
+def find_answer(user_text):
+    for item in faq_data["faq"]:
+        for keyword in item["question"]:
+            if keyword.lower() in user_text.lower():
+                return item["answer"]
+    return "Xin lỗi, tôi chưa hiểu câu hỏi. Bạn có thể hỏi: giờ mở cửa, giá vé, khuyến mãi, trải nghiệm…"
+
+# =========================
+# 2. SPEECH TO TEXT
+# =========================
+recognizer = sr.Recognizer()
+
+def speech_to_text(audio_file):
+    with sr.AudioFile(audio_file) as source:
+        audio = recognizer.record(source)
+        try:
+            text = recognizer.recognize_google(audio, language="vi-VN")
+            return text
+        except:
+            return None
+
+# =========================
+# 3. UI
+# =========================
+st.set_page_config(page_title="Trợ lý A.I Trưng Vương Garden", layout="centered")
+
 st.markdown("<h2 style='text-align:center;'>CHÀO MỪNG BẠN ĐẾN TRƯNG VƯƠNG GARDEN</h2>", unsafe_allow_html=True)
 st.markdown("<h4 style='text-align:center;'>TRỢ LÝ A.I BẰNG GIỌNG NÓI TVG</h4>", unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
+st.subheader("🎧 Tương tác với trợ lý")
+st.write("Vui lòng **bấm nút để hỏi** và nói câu hỏi của bạn bằng micro.")
 
-# ---------- Giới thiệu và lời chào ----------
-with col1:
-    if st.button("🎵 Phát lời chào"):
-        if Path("intro.mp3").exists():
-            st.audio("intro.mp3", format="audio/mp3")
-        else:
-            st.warning("Chưa có file intro.mp3. Vui lòng tạo file lời chào trước.")
+# --- NÚT GHI ÂM ---
+audio_data = st.audio_input("🎤 **Bấm để hỏi**")
 
-# ---------- Tương tác giọng nói ----------
-st.divider()
-st.subheader("Tương tác với trợ lý")
-st.markdown("**Vui lòng bấm nút để hỏi** và nói câu hỏi của bạn bằng micro.")
+user_question = None
+assistant_answer = None
 
-# Record audio component
-try:
-    from audio_recorder_streamlit import audio_recorder
-    recorder_available = True
-except ImportError:
-    recorder_available = False
+# Nếu người dùng ghi âm
+if audio_data:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        tmp.write(audio_data.getvalue())
+        tmp_path = tmp.name
 
-audio_bytes = None
-if recorder_available:
-    audio_bytes = audio_recorder()
-else:
-    uploaded = st.file_uploader("Hoặc tải file âm thanh lên (wav/mp3/m4a/webm)", type=["wav","mp3","m4a","webm"])
-    if uploaded:
-        audio_bytes = uploaded.read()
+    text = speech_to_text(tmp_path)
 
-if audio_bytes:
-    st.info("Đang xử lý âm thanh...")
-    wav_path = save_audio_bytes_to_wav(audio_bytes)
-    user_text = transcribe_audio(wav_path)
-    if not user_text:
-        st.warning("Không nhận diện được giọng nói. Hãy thử lại.")
+    if text:
+        user_question = text
+        assistant_answer = find_answer(text)
     else:
-        st.success(f"Bạn nói: {user_text}")
-        answer = find_answer(user_text)
-        st.success(f"Trợ lý trả lời: {answer}")
-        if st.button("🔊 Phát lời đáp"):
-            tts_data = tts_bytes(answer)
-            st.audio(tts_data, format="audio/mp3")
+        user_question = "Không nhận dạng được giọng nói."
+        assistant_answer = "Bạn nói chưa rõ, vui lòng bấm để hỏi lại."
+
+# --- Upload file audio ---
+st.write("Hoặc tải file âm thanh lên (wav/mp3/m4a/webm)")
+
+uploaded = st.file_uploader(" ", type=["wav", "mp3", "m4a", "webm"])
+
+if uploaded:
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(uploaded.read())
+        tmp_path = tmp.name
+
+    text = speech_to_text(tmp_path)
+
+    if text:
+        user_question = text
+        assistant_answer = find_answer(text)
+    else:
+        user_question = "Không nhận dạng được âm thanh."
+        assistant_answer = "Bạn vui lòng thử lại."
+
+# Hiển thị kết quả
+if user_question:
+    st.info(f"**Bạn hỏi:** {user_question}")
+
+if assistant_answer:
+    st.success(f"**Trợ lý trả lời:** {assistant_answer}")
 
 st.markdown("<p style='text-align:center; color: gray;'>Sản phẩm do nhóm học sinh CLB Lập trình lớp 7C</p>", unsafe_allow_html=True)
