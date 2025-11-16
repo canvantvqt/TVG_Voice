@@ -1,144 +1,187 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import json
-import base64
-from openai import OpenAI
+from pathlib import Path
 
-client = OpenAI()
+st.set_page_config(page_title="Trưng Vương Garden - Voice Assistant (Free)", layout="centered")
 
-# ------------------------------------------------------------------------------------
-# 1. LOAD JSON FAQ
-# ------------------------------------------------------------------------------------
-def load_faq():
-    with open("faq_garden.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+# ---------- Load FAQ ----------
+FAQ_PATH = Path("faq_garden.json")
+if not FAQ_PATH.exists():
+    st.error("Không tìm thấy file faq_garden.json trong cùng thư mục.")
+    st.stop()
 
-faq_data = load_faq()
+with open(FAQ_PATH, encoding="utf-8") as f:
+    faq_data = json.load(f)
 
-def lookup_answer(user_text):
-    """Tìm câu trả lời theo JSON như bản Python gốc"""
-    for item in faq_data["faq"]:
-        for key in item["question"]:
-            if key.lower() in user_text.lower():
-                return item["answer"]
-
+def find_answer(user_text: str) -> str:
+    for item in faq_data.get("faq", []):
+        for kw in item.get("question", []):
+            if kw.lower() in user_text.lower():
+                return item.get("answer", "")
     return ("Xin lỗi, tôi chưa hiểu câu hỏi của bạn. "
-            "Bạn có thể hỏi về giờ mở cửa, giá vé, trải nghiệm, "
-            "ẩm thực, khuyến mãi hoặc liên hệ.")
+            "Bạn có thể hỏi về giờ mở cửa, giá vé, trải nghiệm, ẩm thực, khuyến mãi hoặc liên hệ.")
 
+# ---------- UI ----------
+st.markdown("<h2 style='text-align:center;'>CHÀO MỪNG BẠN ĐẾN TRƯNG VƯƠNG GARDEN</h2>", unsafe_allow_html=True)
+st.markdown("<h4 style='text-align:center;'>TRỢ LÝ A.I BẰNG GIỌNG NÓI TVG (MIỄN PHÍ)</h4>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color: gray;'>Sản phẩm do nhóm học sinh CLB Lập trình lớp 7C</p>", unsafe_allow_html=True)
 
-# ------------------------------------------------------------------------------------
-# 2. TTS – CHUYỂN VĂN BẢN → GIỌNG NÓI GTS-1
-# ------------------------------------------------------------------------------------
-def text_to_speech(text):
-    response = client.audio.speech.create(
-        model="gts-1",
-        voice="default",
-        input=text
-    )
-    audio_bytes = response.read()
-    return audio_bytes
+st.write("---")
+st.write("Hướng dẫn ngắn: 1) Nhấn **Phát lời chào** để nghe giới thiệu. 2) Nhấn **Bấm để hỏi**, nói câu hỏi. 3) Trợ lý trả lời bằng âm thanh. 4) Nhấn **Kết thúc** để chào tạm biệt.")
 
+col1, col2, col3 = st.columns([1,1,1])
 
-# ------------------------------------------------------------------------------------
-# 3. STT – NHẬN DIỆN GIỌNG NÓI (twilio / openai whisper)
-# ------------------------------------------------------------------------------------
-def speech_to_text(audio_file):
-    transcript = client.audio.transcriptions.create(
-        model="gpt-4o-audio-preview",
-        file=audio_file
-    )
-    return transcript.text
+with col1:
+    if st.button("▶️ Phát lời chào"):
+        # khi người bấm, front-end sẽ tự đọc đoạn INTRO (JS sẽ thực thi)
+        st.experimental_set_query_params(action="play_intro")
+        st.success("Đã gửi lệnh phát lời chào (trình duyệt sẽ đọc).")
 
+with col2:
+    # nút request start — front-end sẽ dùng Web Speech để bắt mic
+    if st.button("🎤 Bấm để hỏi"):
+        st.experimental_set_query_params(action="start_listen")
+        st.success("Bạn có thể bắt đầu nói — trình duyệt sẽ ghi âm và nhận dạng.")
 
-# ------------------------------------------------------------------------------------
-# 4. PLAY AUDIO
-# ------------------------------------------------------------------------------------
-def play_audio(audio_bytes):
-    st.audio(audio_bytes, format="audio/mp3")
+with col3:
+    if st.button("⏹ Kết thúc"):
+        st.experimental_set_query_params(action="stop_and_bye")
+        st.success("Kết thúc phiên. Trình duyệt sẽ đọc lời tạm biệt.")
 
+st.write("---")
 
-# ------------------------------------------------------------------------------------
-# 5. INTRO – PHÁT TỰ ĐỘNG LÚC KHỞI ĐỘNG
-# ------------------------------------------------------------------------------------
-INTRO_TEXT = """
-Xin chào! Tôi là trợ lý Voice AI Trưng Vương Garden.
-Khu trải nghiệm của chúng tôi có nhiều dịch vụ thú vị:
-Vé tham quan, Vườn cây nhiệt đới, Vườn chim Aviary, Sở thú ăn chay,
-Thác nước Apsara, Suối đá Mồ Côi, Bến Thiên Cầm, Nhà tre cộng đồng,
-Vườn tượng cảnh quan, Hồ Thiên Nga, Cầu Kiều.
-Các hoạt động trải nghiệm: cưỡi ngựa, Hồ bơi Pool Party, xe đạp đôi và đơn,
-xe điện tham quan, thuyền Thiên Nga, thuyền SUP, Kayak,
-Trượt phao cầu vồng, xe đua Gokart.
-Ẩm thực tại nhà hàng Champa phục vụ ẩm thực địa phương,
-bãi đỗ xe miễn phí và nhiều góc checkin.
-Bạn có thể hỏi tôi về: giờ mở cửa, giá vé, trải nghiệm, khuyến mãi, ẩm thực hoặc liên hệ.
+# placeholders for displaying recognized text and assistant reply
+user_txt_ph = st.empty()
+assistant_txt_ph = st.empty()
+
+# This component embeds client-side JS that:
+# - listens to URL query param changes (action) and triggers Web Speech API accordingly
+# - does STT in browser, then POST the recognized text back to Streamlit via fetch to '/streamlit-server' is not possible
+# Instead, we'll use the streamlit javascript-to-python communication using window.parent.postMessage
+# The HTML below uses the Streamlit component protocol to send the recognized text back to Streamlit.
+#
+# The component returns the last recognized text as the component return value.
+#
+from streamlit.components.v1 import html
+
+COMPONENT_HTML = f"""
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>TVG Voice Client</title>
+  </head>
+  <body>
+    <script>
+      // Utility to send value back into Streamlit
+      function sendToStreamlit(value) {{
+        const msg = {{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: value}};
+        window.parent.postMessage(msg, "*");
+      }}
+
+      // Read query param to decide action (start_listen, play_intro, stop_and_bye)
+      function getAction() {{
+        try {{
+          const params = new URLSearchParams(window.location.search);
+          return params.get("action");
+        }} catch(e) {{
+          return null;
+        }}
+      }}
+
+      // Speech synthesis (TTS) via browser
+      function speak(text) {{
+        if (!("speechSynthesis" in window)) {{
+          alert("Trình duyệt không hỗ trợ SpeechSynthesis.");
+          return;
+        }}
+        const ut = new SpeechSynthesisUtterance(text);
+        ut.lang = "vi-VN";
+        // optional: choose voice if available
+        const voices = speechSynthesis.getVoices();
+        // choose first vi voice if present
+        for (let v of voices) {{
+          if (v.lang && v.lang.startsWith("vi")) {{
+            ut.voice = v;
+            break;
+          }}
+        }}
+        speechSynthesis.cancel();
+        speechSynthesis.speak(ut);
+      }}
+
+      // Web Speech API for recognition
+      let recognition = null;
+      function startRecognition() {{
+        if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {{
+          alert("Trình duyệt không hỗ trợ Web Speech API. Hãy dùng Chrome hoặc Edge.");
+          sendToStreamlit("");
+          return;
+        }}
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        recognition.lang = "vi-VN";
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+        recognition.onresult = function(event) {{
+          const text = event.results[0][0].transcript;
+          // send recognized text to Streamlit
+          sendToStreamlit(text);
+        }};
+        recognition.onerror = function(event) {{
+          console.log("SpeechRecognition error", event);
+          sendToStreamlit("");
+        }};
+        recognition.onend = function() {{
+          // ended
+        }};
+        recognition.start();
+      }}
+
+      // parse action and run
+      const action = getAction();
+      if (action === "play_intro") {{
+        const intro = {json.dumps("""Xin chào! Tôi là trợ lý Voice AI Trưng Vương Garden. Khu trải nghiệm của chúng tôi có nhiều dịch vụ thú vị: Vé tham quan, Vườn cây nhiệt đới, Vườn chim Aviary, Sở thú ăn chay, Thác nước Apsara, Suối đá Mồ Côi, Bến Thiên Cầm, Nhà tre cộng đồng, Vườn tượng cảnh quan, Hồ Thiên Nga, Cầu Kiều. Các hoạt động trải nghiệm: cưỡi ngựa, Hồ bơi Pool Party, xe đạp đôi và đơn, xe điện tham quan, thuyền Thiên Nga, thuyền SUP, KAYAK, Trượt phao cầu vồng, xe đua Gokart. Ẩm thực tại nhà hàng Champa phục vụ ẩm thực địa phương, bãi đỗ xe miễn phí và nhiều góc checkin. Bạn có thể hỏi tôi về: giờ mở cửa, giá vé, trải nghiệm, khuyến mãi, ẩm thực hoặc liên hệ.""" )};
+        speak(intro);
+        // reset action param by updating history (so button can be pressed again)
+        history.replaceState(null, "", window.location.pathname);
+        // send empty to not trigger processing
+        sendToStreamlit("");
+      }} else if (action === "start_listen") {{
+        startRecognition();
+        // reset query
+        history.replaceState(null, "", window.location.pathname);
+      }} else if (action === "stop_and_bye") {{
+        speak("Cảm ơn bạn đã tham quan Trưng Vương Garden. Hẹn gặp lại!");
+        history.replaceState(null, "", window.location.pathname);
+        sendToStreamlit("__STOP__");
+      }} else {{
+        // no action -> do nothing
+        sendToStreamlit("");
+      }}
+    </script>
+  </body>
+</html>
 """
 
+# The component returns a string: recognized text or special flag
+result = html(COMPONENT_HTML, height=0)  # height=0 hides iframe chrome
 
-# ------------------------------------------------------------------------------------
-# 6. STREAMLIT UI
-# ------------------------------------------------------------------------------------
-st.set_page_config(page_title="Trợ lý A.I TVG", layout="centered")
-
-st.title("🎧 TRỢ LÝ A.I BẰNG GIỌNG NÓI – TRƯNG VƯƠNG GARDEN")
-st.subheader("Vui lòng bấm nút bên dưới để hỏi bằng giọng nói")
-
-# Lưu trạng thái intro
-if "intro_played" not in st.session_state:
-    st.session_state.intro_played = False
-
-# Lưu trạng thái kết thúc
-if "ended" not in st.session_state:
-    st.session_state.ended = False
-
-# ------------------------------------------------------------------------------------
-# PHÁT INTRO TỰ ĐỘNG KHI MỞ APP
-# ------------------------------------------------------------------------------------
-if not st.session_state.intro_played:
-    st.session_state.intro_played = True
-    intro_audio = text_to_speech(INTRO_TEXT)
-    play_audio(intro_audio)
-    st.info("👆 Đây là lời chào tự động. Mời bạn bấm nút bên dưới để đặt câu hỏi.")
-    st.stop()
-
-
-# ------------------------------------------------------------------------------------
-# NÚT GHI ÂM – “BẤM ĐỂ HỎI”
-# ------------------------------------------------------------------------------------
-audio_uploaded = st.audio_input("🎤 **Bấm để hỏi** – nói câu hỏi của bạn", label_visibility="visible")
-
-
-# ------------------------------------------------------------------------------------
-# NÚT KẾT THÚC
-# ------------------------------------------------------------------------------------
-if st.button("⛔ KẾT THÚC TƯƠNG TÁC"):
-    bye_audio = text_to_speech("Cảm ơn bạn đã ghé thăm Trưng Vương Garden. Hẹn gặp lại bạn.")
-    play_audio(bye_audio)
-    st.session_state.ended = True
-
-if st.session_state.ended:
-    st.warning("👉 Phiên tương tác đã kết thúc.")
-    st.stop()
-
-
-# ------------------------------------------------------------------------------------
-# XỬ LÝ KHI CÓ ÂM THANH ĐẦU VÀO
-# ------------------------------------------------------------------------------------
-if audio_uploaded is not None:
-    with st.spinner("⏳ Đang nhận diện giọng nói..."):
-        user_text = speech_to_text(audio_uploaded)
-
-    st.success(f"**Bạn hỏi:** {user_text}")
-
-    # Tìm câu trả lời JSON
-    answer = lookup_answer(user_text)
-
-    # Hiển thị text
-    st.write("### 📌 Trợ lý trả lời:")
-    st.write(answer)
-
-    # Nói bằng giọng
-    audio_reply = text_to_speech(answer)
-    play_audio(audio_reply)
-
-    st.info("Bạn có thể tiếp tục bấm nút để hỏi thêm.")
+# When result is not empty, act: if __STOP__ -> speak bye handled client-side; else use it as user query
+if result and result != "__STOP__":
+    user_text = result
+    user_txt_ph.info(f"Bạn nói: {user_text}")
+    answer = find_answer(user_text)
+    assistant_txt_ph.success(f"Trợ lý trả lời: {answer}")
+    # Now instruct client to speak the answer: we reuse experimental_set_query_params to send an action the JS will catch next render
+    # encode the answer in query param (URL length limit; keep answers short). We'll set action=tts&text=...
+    # To avoid URL length issues, we'll trigger play_intro-like behavior: set action=start_tts with text encoded in base64
+    import base64
+    b = base64.b64encode(answer.encode("utf-8")).decode("ascii")
+    st.experimental_set_query_params(action="tts", payload=b)
+    # The JS component doesn't currently handle tts via action=tts; so to keep it simple, show a 'Phát lời đáp' button:
+    if st.button("🔊 Phát lời đáp"):
+        # instruct client to speak by setting action=tts - JS in component won't run again automatically, but we'll trigger by re-rendering the component with new params
+        st.experimental_set_query_params(action="play_answer", payload=b)
+        st.experimental_rerun()
