@@ -1,12 +1,26 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
+import speech_recognition as sr
+from io import BytesIO
+from pydub import AudioSegment
 import json
+import base64
 
 st.set_page_config(page_title="Trưng Vương Garden - Voice Assistant", layout="centered")
 
-# ---- HÀM TRA CỨU JSON ----
+st.markdown("<h2 style='text-align:center;'>CHÀO MỪNG BẠN ĐẾN TRƯNG VƯƠNG GARDEN</h2>", unsafe_allow_html=True)
+st.markdown("<h4 style='text-align:center;'>TRỢ LÝ A.I BẰNG GIỌNG NÓI TVG</h4>", unsafe_allow_html=True)
+
+st.markdown("""
+**Hướng dẫn ngắn:**
+1) Nhấn **Phát lời chào** để nghe giới thiệu.
+2) Nhấn **Bấm để hỏi**, ghi âm câu hỏi (upload file audio).
+3) Trợ lý trả lời bằng âm thanh.
+4) Nhấn **Kết thúc** để chào tạm biệt.
+""")
+
+# ---- Load FAQ JSON ----
 def find_answer(user_text):
-    """Tra cứu câu trả lời từ file JSON faq_garden.json"""
     try:
         with open("faq_garden.json", encoding="utf-8") as f:
             faq_data = json.load(f)
@@ -20,80 +34,73 @@ def find_answer(user_text):
     return ("Xin lỗi, tôi chưa hiểu câu hỏi của bạn. "
             "Bạn có thể hỏi về giờ mở cửa, giá vé, trải nghiệm, ẩm thực, khuyến mãi hoặc liên hệ.")
 
-# ---- GIAO DIỆN ----
-st.markdown("<h2 style='text-align:center;'>CHÀO MỪNG BẠN ĐẾN TRƯNG VƯƠNG GARDEN</h2>", unsafe_allow_html=True)
-st.markdown("<h4 style='text-align:center;'>TRỢ LÝ A.I BẰNG GIỌNG NÓI TVG</h4>", unsafe_allow_html=True)
+# ---- Phát lời chào bằng HTML5 audio (miễn phí, trình duyệt) ----
+def play_audio_file(file_path):
+    audio_file = open(file_path, "rb").read()
+    b64_audio = base64.b64encode(audio_file).decode()
+    audio_html = f"""
+        <audio autoplay="true" controls>
+        <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+        Your browser does not support the audio element.
+        </audio>
+    """
+    st.markdown(audio_html, unsafe_allow_html=True)
 
-st.markdown("""
-Hướng dẫn ngắn:  
-1) Nhấn 🎤 Phát lời chào để nghe giới thiệu.  
-2) Nhấn 💬 Bấm để hỏi, nhập câu hỏi hoặc upload file audio.  
-3) Trợ lý trả lời bằng âm thanh và văn bản.  
-4) Nhấn ⏹ Kết thúc để chào tạm biệt.
-""")
+# ---- STT từ file audio ----
+def transcribe_audio(uploaded_file):
+    if uploaded_file is None:
+        return None
+    # Chuyển audio về WAV nếu cần
+    file_bytes = uploaded_file.read()
+    audio = AudioSegment.from_file(BytesIO(file_bytes))
+    wav_io = BytesIO()
+    audio.export(wav_io, format="wav")
+    wav_io.seek(0)
+    
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(wav_io) as source:
+        audio_data = recognizer.record(source)
+        try:
+            text = recognizer.recognize_google(audio_data, language='vi-VN')
+            return text
+        except sr.UnknownValueError:
+            return "Tôi không nghe rõ, bạn vui lòng nói lại nhé!"
+        except sr.RequestError:
+            return "Hiện tại không thể kết nối dịch vụ STT."
 
-# ---- BUTTONS ----
+# ---- MAIN UI ----
 col1, col2, col3 = st.columns([1,1,1])
 
-if 'conversation' not in st.session_state:
-    st.session_state.conversation = []
+# State
+if 'stop' not in st.session_state:
+    st.session_state.stop = False
 
-# ---- Lời chào và tạm biệt ----
-intro_text = (
-    "Xin chào! Tôi là trợ lý Voice AI Trưng Vương Garden. "
-    "Khu trải nghiệm của chúng tôi có nhiều dịch vụ thú vị: "
-    "Vé tham quan, Vườn cây nhiệt đới, Vườn chim Aviary, Sở thú ăn chay, "
-    "Thác nước Apsara, Suối đá Mồ Côi, Bến Thiên Cầm, Nhà tre cộng đồng, "
-    "Vườn tượng cảnh quan, Hồ Thiên Nga, Cầu Kiều. "
-    "Các hoạt động trải nghiệm: cưỡi ngựa, Hồ bơi Pool Party, xe đạp đôi và đơn, "
-    "xe điện tham quan, thuyền Thiên Nga, thuyền SUP, KAYAK, "
-    "Trượt phao cầu vồng, xe đua Gokart. "
-    "Ẩm thực tại nhà hàng Champa phục vụ ẩm thực địa phương, "
-    "bãi đỗ xe miễn phí và nhiều góc checkin. "
-    "Bạn có thể hỏi tôi về: giờ mở cửa, giá vé, trải nghiệm, khuyến mãi, ẩm thực hoặc liên hệ."
-)
-
-bye_text = "Cảm ơn bạn đã tham quan Trưng Vương Garden. Chào tạm biệt!"
-
-# ---- PHÁT LỜI CHÀO ----
 with col1:
-    if st.button("🎤 Phát lời chào"):
-        st.session_state.conversation.append(("TVG", intro_text))
-        st.markdown(f"**Trợ lý:** {intro_text}")
-        st.markdown(f"""
-        <script>
-        var msg = new SpeechSynthesisUtterance("{intro_text}");
-        msg.lang = "vi-VN";
-        window.speechSynthesis.speak(msg);
-        </script>
-        """, unsafe_allow_html=True)
+    if st.button("▶️ Phát lời chào"):
+        # intro.mp3 phải có trong repo
+        play_audio_file("intro.mp3")
 
-# ---- BẤM ĐỂ HỎI ----
 with col2:
-    user_input = st.text_input("💬 Bấm để hỏi", key="user_input")
-    if st.button("Gửi câu hỏi") and user_input:
-        answer = find_answer(user_input)
-        st.session_state.conversation.append(("Bạn", user_input))
-        st.session_state.conversation.append(("TVG", answer))
-        st.markdown(f"**Bạn:** {user_input}")
-        st.markdown(f"**Trợ lý:** {answer}")
-        st.markdown(f"""
-        <script>
-        var msg = new SpeechSynthesisUtterance("{answer}");
-        msg.lang = "vi-VN";
-        window.speechSynthesis.speak(msg);
-        </script>
-        """, unsafe_allow_html=True)
+    uploaded_audio = st.file_uploader("🎤 Bấm để hỏi", type=["wav", "mp3", "m4a", "webm"])
+    if uploaded_audio is not None:
+        user_text = transcribe_audio(uploaded_audio)
+        st.info(f"Bạn nói: {user_text}")
+        answer_text = find_answer(user_text)
+        st.success(f"Trợ lý trả lời: {answer_text}")
+        # Phát bằng TTS trình duyệt
+        tts_file = "temp_answer.mp3"
+        from gtts import gTTS
+        tts = gTTS(text=answer_text, lang="vi")
+        tts.save(tts_file)
+        play_audio_file(tts_file)
 
-# ---- KẾT THÚC ----
 with col3:
     if st.button("⏹ Kết thúc"):
-        st.session_state.conversation.append(("TVG", bye_text))
-        st.markdown(f"**Trợ lý:** {bye_text}")
-        st.markdown(f"""
-        <script>
-        var msg = new SpeechSynthesisUtterance("{bye_text}");
-        msg.lang = "vi-VN";
-        window.speechSynthesis.speak(msg);
-        </script>
-        """, unsafe_allow_html=True)
+        farewell_text = "Cảm ơn bạn đã sử dụng Trợ lý Trưng Vương Garden. Chào tạm biệt!"
+        st.success(farewell_text)
+        tts = gTTS(text=farewell_text, lang="vi")
+        tts.save("farewell.mp3")
+        play_audio_file("farewell.mp3")
+        st.session_state.stop = True
+
+st.markdown("<p style='text-align:center; color: gray;'>Sản phẩm do nhóm học sinh CLB Lập trình lớp 7C</p>", unsafe_allow_html=True)
