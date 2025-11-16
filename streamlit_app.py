@@ -69,7 +69,8 @@ def transcribe_audio(uploaded_file):
             return "Hiện tại không thể kết nối dịch vụ STT."
 
 # ---- MAIN UI ----
-col1, col2, col3 = st.columns([1,1,1])
+# ---- MAIN UI ----
+col1, col2, col3 = st.columns([1,2,1])  # col2 rộng hơn
 
 # State
 if 'stop' not in st.session_state:
@@ -77,22 +78,22 @@ if 'stop' not in st.session_state:
 
 with col1:
     if st.button("▶️ Phát lời chào"):
-        # intro.mp3 phải có trong repo
         play_audio_file("intro.mp3")
 
-with col2:
-    uploaded_audio = st.file_uploader("🎤 Bấm để hỏi", type=["wav", "mp3", "m4a", "webm"])
-    if uploaded_audio is not None:
-        user_text = transcribe_audio(uploaded_audio)
-        st.info(f"Bạn nói: {user_text}")
-        answer_text = find_answer(user_text)
-        st.success(f"Trợ lý trả lời: {answer_text}")
-        # Phát bằng TTS trình duyệt
-        tts_file = "temp_answer.mp3"
-        from gtts import gTTS
-        tts = gTTS(text=answer_text, lang="vi")
-        tts.save(tts_file)
-        play_audio_file(tts_file)
+# Đặt file uploader ngoài col2 để rộng toàn màn hình cột giữa
+st.markdown("### 🎤 Bấm để hỏi (upload file audio)")
+uploaded_audio = st.file_uploader("", type=["wav", "mp3", "m4a", "webm"])
+if uploaded_audio is not None:
+    user_text = transcribe_audio(uploaded_audio)
+    st.info(f"Bạn nói: {user_text}")
+    answer_text = find_answer(user_text)
+    st.success(f"Trợ lý trả lời: {answer_text}")
+    # Phát bằng TTS trình duyệt
+    tts_file = "temp_answer.mp3"
+    from gtts import gTTS
+    tts = gTTS(text=answer_text, lang="vi")
+    tts.save(tts_file)
+    play_audio_file(tts_file)
 
 with col3:
     if st.button("⏹ Kết thúc"):
@@ -102,5 +103,4 @@ with col3:
         tts.save("farewell.mp3")
         play_audio_file("farewell.mp3")
         st.session_state.stop = True
-
 st.markdown("<p style='text-align:center; color: gray;'>Sản phẩm do nhóm học sinh CLB Lập trình lớp 7C</p>", unsafe_allow_html=True)
